@@ -476,14 +476,82 @@ class MEGA {
     return $path;
   }
 
+  public function node_get_root_id() {
+    $root_id = false;
+    $res = $this->node_list();
+    foreach($res['f'] as $res_f) {
+      if($res_f['t'] == 2) {
+        $root_id = $res_f['h'];
+      }
+    }
+    return $root_id;
+  }
+
   /**
    * Add/copy nodes.
    *
    * Adds new nodes. Copies existing files and adds completed uploads to a
    * user's filesystem.
    */
-  public function node_add() {
-    throw Exception('Not implemented');
+  public function node_add($dest, $filename, $tmp_filename) {
+    $size = filesize($filename);
+    if(!$size) {
+      return false;
+    }
+
+    $req = array('a' => 'u', 's' => $size);
+    $ul_url = $this->api_req(array($req));
+    $ul_url = $ul_url[0]['p'];
+    if(!$ul_url) {
+      return false;
+    }
+
+    $ul_key = array(0, 1, 2, 3, 4, 5);
+    for ($i = 0; $i < 6; $i++) {
+      $ul_key[$i] = rand(0, 0xFFFFFFFF);
+    }
+
+    $td = mcrypt_module_open(MCRYPT_RIJNDAEL_128, '', 'ctr', '');
+
+    mcrypt_generic_init(
+      $td,
+      MEGAUtil::a32_to_str(array_slice($ul_key, 0, 4)),
+      MEGAUtil::a32_to_str(array($ul_key[4], $ul_key[5], 0, 0))
+    );
+
+    $f1 = fopen($filename, 'rb');
+    $f2 = fopen($tmp_filename, 'wb');
+    if(!$f1 || !$f2) {
+      return false;
+    }
+    $chunks = $this->get_chunks($size);
+    foreach ($chunks as $chunk_start => $chunk_size) {
+      $s = fread($f1, $chunk_size);
+      fwrite($f2, mcrypt_generic($td, $s));
+    }
+    fclose($f1);
+    fclose($f2);
+
+    $completion_handle = $this->http_do_request_post_file($ul_url, $tmp_filename);
+
+    $data_mac = MEGACrypto::cbc_mac_file($filename, array_slice($ul_key, 0, 4), array_slice($ul_key, 4, 2));
+    $meta_mac = array($data_mac[0] ^ $data_mac[1], $data_mac[2] ^ $data_mac[3]);
+    $attributes = array('n' => basename($filename));
+    $enc_attributes = MEGACrypto::enc_attr($attributes, array_slice($ul_key, 0, 4));
+    $key = array($ul_key[0] ^ $ul_key[4], $ul_key[1] ^ $ul_key[5], $ul_key[2] ^ $meta_mac[0], $ul_key[3] ^ $meta_mac[1], $ul_key[4], $ul_key[5], $meta_mac[0], $meta_mac[1]);
+    $req = array(
+    	'a' => 'p',
+    	't' => $dest,
+    	'n' => array(
+    		array(
+    			'h' => $completion_handle,
+    			't' => 0,
+    			'a' => MEGAUtil::base64urlencode($enc_attributes),
+    			'k' => MEGAUtil::a32_to_base64(MEGACrypto::encrypt_key($this->u_k_aes, $key))
+    		)
+    	)
+    );
+    return $this->api_req(array($req));
   }
 
   /**
@@ -716,7 +784,7 @@ class MEGA {
     return $ret;
   }
 
-  protected function get_chunks($size) {
+  public static function get_chunks($size) {
     $chunks = array();
     $p = $pp = 0;
     $i = 1;
@@ -745,6 +813,7 @@ class MEGA {
   protected function node_decrypt_key($k) {
     static $cache = array();
     if (!isset($cache[$k])) {
+      $cache[$k] = false;
       $keys = explode('/', $k);
       list (, $key) = explode(':', $keys[0]);
       if (!empty($key)) {
@@ -818,6 +887,44 @@ class MEGA {
     return $content;
   }
 
+  /**
+   *
+   *
+   */
+  protected function http_do_request_post_file($url, $file) {
+    //$url = ($this->ssl ? 'https' : 'http') . '://' . $this->endpoint . '/cs?id=' . $this->sequence_number;
+
+    $fp = fopen($file, 'rb');
+
+    $curl_handle = curl_init();
+    $curl_options = array(
+      CURLOPT_URL => $url,
+      CURLOPT_FOLLOWLOCATION => TRUE,
+      CURLOPT_RETURNTRANSFER => TRUE,
+      CURLOPT_SSL_VERIFYPEER => FALSE, // Required to run on https.
+      CURLOPT_SSL_VERIFYHOST => FALSE, // Required to run on https.
+      CURLOPT_PUT => TRUE, // CURLOPT_INFILE* works only with this option
+      CURLOPT_CUSTOMREQUEST => 'POST', // but we can use any method
+      CURLOPT_INFILE => $fp,
+      CURLOPT_INFILESIZE => filesize($file),
+    );
+
+    //print_r($curl_options);
+
+    curl_setopt_array($curl_handle, $curl_options);
+
+    $content = curl_exec($curl_handle);
+
+    fclose($fp);
+
+    //$status = curl_getinfo($curl_handle, CURLINFO_HTTP_CODE);
+    //print "Status: $status\n";
+
+    curl_close($curl_handle);
+
+    return $content;
+  }
+
   protected function http_open_stream($url, $options = array()) {
     $scheme = parse_url($url, PHP_URL_SCHEME);
 
@@ -844,7 +951,7 @@ class MEGA {
 
   protected function log($message) {
   	if (self::DEBUG) {
-    	echo "[DEBUG] MEGA::$message\n";
+    	echo "\n[DEBUG] MEGA::$message\n";
   	}
   }
 
@@ -1039,7 +1146,9 @@ class MEGACrypto {
     }
     $x = array();
     for ($i = 0; $i < count($a); $i += 4) {
-      $x[] = self::encrypt_aes_cbc_a32($key, array($a[$i], $a[$i + 1], $a[$i + 2], $a[$i + 3]));
+      //$x[] = self::encrypt_aes_cbc_a32($key, array($a[$i], $a[$i + 1], $a[$i + 2], $a[$i + 3]));
+      $y = self::encrypt_aes_cbc_a32($key, array($a[$i], $a[$i + 1], $a[$i + 2], $a[$i + 3]));
+      $x = array_merge($x, $y);
     }
     return $x;
   }
@@ -1052,7 +1161,9 @@ class MEGACrypto {
    * @return array
    */
   public static function decrypt_key($key, $a) {
-    if (count($a) == 4) {
+    if (count($a) < 4) {
+      return false;
+    } elseif (count($a) == 4) {
       return self::decrypt_aes_cbc_a32($key, $a);
     }
     $x = array();
@@ -1068,6 +1179,8 @@ class MEGACrypto {
   // attr = Object, key = [] (four-word random key will be generated) or Array(8) (lower four words will be used)
   // returns [ArrayBuffer data,Array key]
   public static function enc_attr($attr, $key) {
+    $attr = 'MEGA' . json_encode($attr);
+    return self::encrypt_aes_cbc(MEGAUtil::a32_to_str($key), $attr);
   }
 
   // decrypt attributes block using AES-CBC, check for MEGA canary
@@ -1093,6 +1206,50 @@ class MEGACrypto {
       $attr['n'] = 'MALFORMED_ATTRIBUTES';
     }
     return $attr;
+  }
+  
+  
+  public static function cbc_mac_file($filename, $k, $n) {
+    $size = filesize($filename);
+    if(!$size) {
+      return false;
+    }
+
+    $fp = fopen($filename, 'rb');
+    if(!$fp) {
+      return false;
+    }
+
+    $chunks = MEGA::get_chunks($size);
+
+    end($chunks);
+    $last_key = key($chunks);
+    reset($chunks);
+
+    $padding_size = ($size % 16) == 0 ? 0 : 16 - $size % 16;
+
+    $file_mac = array(0, 0, 0, 0);
+
+    $k = MEGAUtil::a32_to_str($k);
+
+    foreach ($chunks as $pos => $size) {
+      $chunk_mac = array($n[0], $n[1], $n[0], $n[1]);
+      $s = fread($fp, $size);
+      if($pos == $last_key) {
+        $s .= str_repeat("\0", $padding_size);
+      }
+      for ($i = 0; $i < $size; $i += 16) {
+        $block = MEGAUtil::str_to_a32(substr($s, $i, 16));
+        $chunk_mac = array($chunk_mac[0] ^ $block[0], $chunk_mac[1] ^ $block[1], $chunk_mac[2] ^ $block[2], $chunk_mac[3] ^ $block[3]);
+        $chunk_mac = self::encrypt_aes_cbc_a32($k, $chunk_mac);
+      }
+      $file_mac = array($file_mac[0] ^ $chunk_mac[0], $file_mac[1] ^ $chunk_mac[1], $file_mac[2] ^ $chunk_mac[2], $file_mac[3] ^ $chunk_mac[3]);
+      $file_mac = self::encrypt_aes_cbc_a32($k, $file_mac);
+    }
+
+    fclose($fp);
+
+    return $file_mac;
   }
 }
 
