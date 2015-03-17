@@ -493,7 +493,7 @@ class MEGA {
    * Adds new nodes. Copies existing files and adds completed uploads to a
    * user's filesystem.
    */
-  public function node_add($dest, $filename, $tmp_filename) {
+  public function node_add($dest, $filename_cloud, $filename, $tmp_filename) {
     $size = filesize($filename);
     if(!$size) {
       return false;
@@ -536,7 +536,7 @@ class MEGA {
 
     $data_mac = MEGACrypto::cbc_mac_file($filename, array_slice($ul_key, 0, 4), array_slice($ul_key, 4, 2));
     $meta_mac = array($data_mac[0] ^ $data_mac[1], $data_mac[2] ^ $data_mac[3]);
-    $attributes = array('n' => basename($filename));
+    $attributes = array('n' => $filename_cloud);
     $enc_attributes = MEGACrypto::enc_attr($attributes, array_slice($ul_key, 0, 4));
     $key = array($ul_key[0] ^ $ul_key[4], $ul_key[1] ^ $ul_key[5], $ul_key[2] ^ $meta_mac[0], $ul_key[3] ^ $meta_mac[1], $ul_key[4], $ul_key[5], $meta_mac[0], $meta_mac[1]);
     $req = array(
@@ -825,7 +825,7 @@ class MEGA {
     return $cache[$k];
   }
 
-  protected function api_req($req, $params = array()) {
+  public function api_req($req, $params = array()) {
     $this->api_req_alter($req);
 
     $payload = is_string($req) ? $req : json_encode($req);
