@@ -1,6 +1,6 @@
 {
     "name": "biocoderh/mega-php-client",
-    "version": "1.0.0"
+    "version": "1.0.0",
     "description": "MEGA API Client Library for PHP.",
     "type": "library",
     "keywords": [ "mega", "api", "client", "mega.co.nz" ],
