@@ -137,7 +137,8 @@ print_r($file_info);
 
 ### Uploading
 
-$mega->node_add('Cloud filename', '/path/to/local/file');
+// $filename and $dest is not required
+$mega->node_add('/path/to/local/file', $filename, $dest);
 
 User session
 ------------
