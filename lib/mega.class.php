@@ -15,7 +15,7 @@ class MEGA {
   const SERVER_EUROPE = 'eu.api.mega.co.nz';
 
   /* Enable debug message output. */
-	const DEBUG = true;
+	const DEBUG = false;
 
   /* Default server endpoint. */
   private static $server = MEGA::SERVER_GLOBAL;
@@ -492,9 +492,15 @@ class MEGA {
    *
    * Adds new nodes. Copies existing files and adds completed uploads to a
    * user's filesystem.
+   * 
+   * @param string Path to local file
+   * @param string Filename in cloud
+   * 
+   * @return array JSON Response
    */
-  public function node_add($dest, $filename_cloud, $filename, $tmp_filename) {
-    $size = filesize($filename);
+  public function node_add($path, $filename_cloud, $dest = null) {
+    $size = filesize($path);
+
     if(!$size) {
       return false;
     }
@@ -519,22 +525,26 @@ class MEGA {
       MEGAUtil::a32_to_str(array($ul_key[4], $ul_key[5], 0, 0))
     );
 
-    $f1 = fopen($filename, 'rb');
-    $f2 = fopen($tmp_filename, 'wb');
+    $f1 = fopen($path, 'rb');
+    $f2 = tmpfile();
+
     if(!$f1 || !$f2) {
       return false;
     }
+    
     $chunks = $this->get_chunks($size);
     foreach ($chunks as $chunk_start => $chunk_size) {
       $s = fread($f1, $chunk_size);
       fwrite($f2, mcrypt_generic($td, $s));
     }
+
+    $tmp_filename = stream_get_meta_data($f2)['uri'];
+    $completion_handle = $this->http_do_request_post_file($ul_url, $tmp_filename);
+
     fclose($f1);
     fclose($f2);
 
-    $completion_handle = $this->http_do_request_post_file($ul_url, $tmp_filename);
-
-    $data_mac = MEGACrypto::cbc_mac_file($filename, array_slice($ul_key, 0, 4), array_slice($ul_key, 4, 2));
+    $data_mac = MEGACrypto::cbc_mac_file($path, array_slice($ul_key, 0, 4), array_slice($ul_key, 4, 2));
     $meta_mac = array($data_mac[0] ^ $data_mac[1], $data_mac[2] ^ $data_mac[3]);
     $attributes = array('n' => $filename_cloud);
     $enc_attributes = MEGACrypto::enc_attr($attributes, array_slice($ul_key, 0, 4));

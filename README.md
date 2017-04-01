@@ -135,6 +135,10 @@ print_r($file_info);
 * The ```node_file_save()``` function is equivalent to ```public_file_save()```
 * The ```node_file_download()``` function is equivalent to ```public_file_download()```
 
+### Uploading
+
+$mega->node_add('Cloud filename', '/path/to/local/file');
+
 User session
 ------------
 
@@ -186,7 +190,7 @@ Status
 | `node_file_info` | Request file node info | Implemented |
 | `node_file_download` | Download a file node | Implemented |
 | `node_file_save` | Download and save a file node to disk | Implemented |
-| `node_add`| Add/copy nodes | Not implemented |
+| `node_add`| Add/copy nodes | Implemented |
 | `node_delete`| Delete node | Not implemented |
 | `node_move`| Move node | Not implemented |
 | `node_update`| Set node attributes | Not implemented |
