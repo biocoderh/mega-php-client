@@ -498,7 +498,7 @@ class MEGA {
    * 
    * @return array JSON Response
    */
-  public function node_add($path, $filename_cloud, $dest = null) {
+  public function node_add($path, $filename_cloud = null, $dest = null) {
     $size = filesize($path);
 
     if(!$size) {
@@ -543,6 +543,10 @@ class MEGA {
 
     fclose($f1);
     fclose($f2);
+
+    if (is_null($filename_cloud)) {
+      $filename_cloud = basename($path);
+    }
 
     $data_mac = MEGACrypto::cbc_mac_file($path, array_slice($ul_key, 0, 4), array_slice($ul_key, 4, 2));
     $meta_mac = array($data_mac[0] ^ $data_mac[1], $data_mac[2] ^ $data_mac[3]);
